@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  password    String
+  role        String   @default("STUDENT") // STUDENT, TEACHER, ADMIN, PRINCIPAL, EXAM_CONTROLLER
+  status      String   @default("APPROVED") // PENDING, APPROVED, REJECTED
+  phone       String?
+  department  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Student specific
+  boardRoll   String?
+  regNo       String?
+  semester    String?
+  shift       String?
+  group       String?
+
+  // Teacher specific
+  employeeId  String?
+  designation String?
+
+  // Relations
+  announcements Announcement[]
+  sentMessages  Message[]      @relation("SentMessages")
+  chatRooms     ChatRoomUser[]
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  target    String   @default("ALL") // ALL, STUDENT, TEACHER
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notice {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  fileUrl   String?
+  createdAt DateTime @default(now())
+}
+
+model ChatRoom {
+  id           String         @id @default(uuid())
+  name         String?        // null = direct message
+  isGroup      Boolean        @default(false)
+  
+  // Dynamic Group Parameters
+  targetDepartment String?
+  targetSemester   String?
+  targetShift      String?
+
+  createdAt    DateTime       @default(now())
+  participants ChatRoomUser[]
+  messages     Message[]
+}
+
+model ChatRoomUser {
+  id         String   @id @default(uuid())
+  userId     String
+  chatRoomId String
+  joinedAt   DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room       ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatRoomId])
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  content    String
+  senderId   String
+  chatRoomId String
+  createdAt  DateTime @default(now())
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  room       ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+}
+
+model Schedule {
+  id          String   @id @default(uuid())
+  title       String
+  subject     String
+  date        String
+  startTime   String
+  endTime     String
+  room        String?
+  type        String   @default("EXAM") // EXAM, CLASS, LAB
+  department  String
+  semester    String
+  shift       String?
+  group       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ExamSeat {
+  id          String   @id @default(uuid())
+  title       String
+  fileUrl     String?
+  rows        Int      @default(0)
+  columns     Int      @default(0)
+  layoutJson  String   @default("[]") // stores stringified 2D array of roll numbers
+  department  String
+  semester    String
+  shift       String?
+  group       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Result {
+  id          String   @id @default(uuid())
+  title       String
+  fileUrl     String
+  department  String
+  semester    String
+  shift       String?
+  group       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
