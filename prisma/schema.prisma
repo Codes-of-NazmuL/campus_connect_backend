@@ -16,6 +16,7 @@ model User {
   status      String   @default("APPROVED") // PENDING, APPROVED, REJECTED
   phone       String?
   department  String?
+  fcmToken    String?  // Firebase Cloud Messaging token for push notifications
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

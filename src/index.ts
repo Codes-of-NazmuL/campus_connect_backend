@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+import { fcmService } from './services/fcm.service';
 
 dotenv.config();
 
@@ -59,8 +60,14 @@ io.use((socket, next) => {
   }
 });
 
+const userSocketMap = new Map<string, string>();
+
 io.on('connection', async (socket) => {
   const user = (socket as any).user;
+  
+  if (user?.id) {
+    userSocketMap.set(user.id, socket.id);
+  }
   console.log(`✅ User connected: ${socket.id} (userId: ${user?.id})`);
 
   // Automatically join all the user's existing chat rooms
@@ -111,13 +118,108 @@ io.on('connection', async (socket) => {
 
       // Broadcast to all room members
       io.to(roomId).emit('receive_message', message);
+
+      // Check for offline members and send push notifications
+      const roomUsers = await prisma.chatRoomUser.findMany({
+        where: { chatRoomId: roomId },
+        include: { user: { select: { id: true, fcmToken: true } } },
+      });
+
+      for (const ru of roomUsers) {
+        if (ru.userId !== user.id && ru.user.fcmToken) {
+          // Always send FCM notification. If app is in foreground, FCM hides it (or we can handle it locally).
+          // If app is in background, the system tray notification will show up!
+          fcmService.sendNotification(
+            ru.user.fcmToken,
+            message.sender.name,
+            message.content,
+            { roomId, type: 'message' }
+          );
+        }
+      }
     } catch (err) {
       console.error('Send Message Error:', err);
       socket.emit('error', { message: 'Failed to send message.' });
     }
   });
 
+  // ─── WebRTC Signaling ──────────────────────────────────────────────
+  socket.on('call_user', async (data: { userToCall: string; signalData: any; from: string; name: string }) => {
+    console.log(`📞 call_user received! Caller: ${data.from}, Receiver: ${data.userToCall}`);
+    
+    // Always send FCM call payload if possible (to trigger CallKit reliably)
+    const receiver = await prisma.user.findUnique({ where: { id: data.userToCall }, select: { fcmToken: true } });
+    if (receiver?.fcmToken) {
+      fcmService.sendCallPayload(
+        receiver.fcmToken,
+        data.name,
+        data.from,
+        JSON.stringify(data.signalData)
+      );
+    }
+
+    const receiverSocketId = userSocketMap.get(data.userToCall);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('incoming_call', {
+        signal: data.signalData,
+        from: data.from,
+        name: data.name,
+      });
+    } else if (!receiver?.fcmToken) {
+      // No FCM token and offline, reject
+      const callerSocketId = userSocketMap.get(data.from);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call_rejected');
+      }
+    }
+  });
+
+  socket.on('answer_call', (data: { to: string; signal: any }) => {
+    const callerSocketId = userSocketMap.get(data.to);
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call_accepted', data.signal);
+    }
+  });
+
+  socket.on('ice_candidate', (data: { to: string; candidate: any }) => {
+    const peerSocketId = userSocketMap.get(data.to);
+    if (peerSocketId) {
+      io.to(peerSocketId).emit('ice_candidate', data.candidate);
+    }
+  });
+
+  socket.on('end_call', (data: { to: string }) => {
+    const peerSocketId = userSocketMap.get(data.to);
+    if (peerSocketId) {
+      io.to(peerSocketId).emit('call_ended');
+    }
+  });
+
+  socket.on('reject_call', (data: { to: string }) => {
+    const callerSocketId = userSocketMap.get(data.to);
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call_rejected');
+    }
+  });
+
+  socket.on('call_busy', (data: { to: string }) => {
+    const callerSocketId = userSocketMap.get(data.to);
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call_busy');
+    }
+  });
+
+  socket.on('filter_changed', (data: { to: string, filterIndex: number }) => {
+    const peerSocketId = userSocketMap.get(data.to);
+    if (peerSocketId) {
+      io.to(peerSocketId).emit('filter_changed', { filterIndex: data.filterIndex });
+    }
+  });
+
   socket.on('disconnect', () => {
+    if (user?.id) {
+      userSocketMap.delete(user.id);
+    }
     console.log(`❌ User disconnected: ${socket.id}`);
   });
 });

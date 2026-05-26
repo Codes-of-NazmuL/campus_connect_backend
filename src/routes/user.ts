@@ -51,6 +51,24 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+// PATCH /api/user/fcm-token — update fcm token
+router.patch('/fcm-token', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { fcmToken } = req.body;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fcmToken },
+    });
+    res.json({ message: 'FCM token updated successfully' });
+  } catch (error) {
+    console.error('Update FCM Token Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/user/all — list all students (for teachers)
 router.get('/all', authenticateToken, async (req: AuthRequest, res) => {
   try {
