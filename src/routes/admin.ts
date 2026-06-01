@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireAdmin, requireRoles } from '../middleware/admin';
+import { exec } from 'child_process';
+import util from 'util';
+const execPromise = util.promisify(exec);
 
 // Auto-assign user to dynamic chat groups based on matching filters
 async function autoAssignToDynamicChatGroups(userId: string) {
@@ -421,6 +424,20 @@ router.delete('/chat-groups/:id', authenticateToken, requireRoles(['ADMIN', 'PRI
   } catch (error) {
     console.error('Delete Chat Group Error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/admin/logs — view server PM2 logs
+router.get('/logs', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    // Attempt to run pm2 logs for the 'backend' process.
+    // Use --nostream to prevent it from hanging, and get the last 200 lines.
+    const { stdout, stderr } = await execPromise('pm2 logs backend --lines 200 --nostream');
+    res.json({ logs: stdout || stderr });
+  } catch (error: any) {
+    console.error('Fetch Logs Error:', error);
+    // If pm2 is not found or fails (e.g. running locally without pm2), return an error message
+    res.json({ logs: `Log fetch failed. You might not be running in a PM2 environment.\n\nError: ${error.message}` });
   }
 });
 
